@@ -1,0 +1,12 @@
+﻿# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code config (never publish)
+.claude/
+CLAUDE.md
+
+# Local env / secrets
+.env
+*.local

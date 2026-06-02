@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Baby Sleep Schedule</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    /* Make range inputs a bit nicer / more tappable on mobile */
+    input[type="range"] { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 9999px; background: #e2e8f0; outline: none; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; border-radius: 9999px; background: #6366f1; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+    input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; border: none; border-radius: 9999px; background: #6366f1; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  </style>
+</head>
+<body class="bg-slate-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    // ---- Helpers -------------------------------------------------------------
+
+    // Parse "HH:MM" -> minutes since midnight
+    function parseTime(str) {
+      const [h, m] = str.split(":").map(Number);
+      return h * 60 + m;
+    }
+
+    // minutes since midnight -> "h:MM AM/PM"
+    function formatTime(mins) {
+      let total = ((mins % 1440) + 1440) % 1440; // wrap within a day
+      let h = Math.floor(total / 60);
+      const m = total % 60;
+      const period = h >= 12 ? "PM" : "AM";
+      h = h % 12;
+      if (h === 0) h = 12;
+      return `${h}:${String(m).padStart(2, "0")} ${period}`;
+    }
+
+    // minutes -> "Xh Ym" / "Ym"
+    function formatDuration(mins) {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      if (h === 0) return `${m}m`;
+      if (m === 0) return `${h}h`;
+      return `${h}h ${m}m`;
+    }
+
+    const NAP4_LENGTH = 20;
+    const CATNAP_CUTOFF = 15 * 60 + 30; // 15:30 in minutes
+
+    // ---- Slider control ------------------------------------------------------
+
+    function Slider({ label, value, min, max, step = 5, onChange, unit = "m" }) {
+      return (
+        <div className="mb-4">
+          <div className="flex justify-between items-baseline mb-1">
+            <label className="text-sm font-medium text-slate-700">{label}</label>
+            <span className="text-sm font-semibold text-indigo-600 tabular-nums">{value}{unit}</span>
+          </div>
+          <input
+            type="range"
+            className="w-full"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+          />
+        </div>
+      );
+    }
+
+    function Section({ title, children }) {
+      return (
+        <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
+          <h3 className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-3">{title}</h3>
+          {children}
+        </div>
+      );
+    }
+
+    // ---- Timeline card -------------------------------------------------------
+
+    function EventCard({ event }) {
+      const isSleep = event.type === "sleep";
+      const wrap = isSleep
+        ? "bg-indigo-600 text-white border-indigo-700"
+        : "bg-amber-50 text-amber-900 border-amber-200";
+      const sub = isSleep ? "text-indigo-200" : "text-amber-600";
+
+      return (
+        <div className={`rounded-xl border p-4 ${wrap}`}>
+          <div className="flex justify-between items-start">
+            <div>
+              <div className="font-semibold flex items-center gap-2">
+                <span>{isSleep ? "🌙" : "☀️"}</span>
+                {event.label}
+              </div>
+              <div className={`text-sm mt-1 ${sub}`}>
+                {formatTime(event.start)} – {formatTime(event.end)}
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-lg font-bold tabular-nums">{formatDuration(event.duration)}</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ---- App -----------------------------------------------------------------
+
+    function App() {
+      const [wakeTime, setWakeTime] = useState("06:30");
+      const [ww1, setWw1] = useState(90);
+      const [nap1, setNap1] = useState(45);
+      const [ww2, setWw2] = useState(105);
+      const [nap2, setNap2] = useState(45);
+      const [ww3, setWw3] = useState(120);
+      const [nap3, setNap3] = useState(45);
+      const [ww4, setWw4] = useState(120);
+      const [ww5, setWw5] = useState(120);
+
+      const { events, includeCatnap } = useMemo(() => {
+        const start = parseTime(wakeTime);
+        const evs = [];
+        let cursor = start;
+
+        const addAwake = (label, len) => {
+          evs.push({ type: "awake", label, start: cursor, end: cursor + len, duration: len });
+          cursor += len;
+        };
+        const addSleep = (label, len) => {
+          evs.push({ type: "sleep", label, start: cursor, end: cursor + len, duration: len });
+          cursor += len;
+        };
+
+        addAwake("Wake Window 1", ww1);
+        addSleep("Nap 1", nap1);
+        addAwake("Wake Window 2", ww2);
+        addSleep("Nap 2", nap2);
+        addAwake("Wake Window 3", ww3);
+        addSleep("Nap 3", nap3);
+
+        const nap3End = cursor; // cursor is now at the end of Nap 3
+        const includeCatnap = nap3End < CATNAP_CUTOFF;
+
+        addAwake("Wake Window 4", ww4);
+        if (includeCatnap) {
+          addSleep("Nap 4 (Catnap)", NAP4_LENGTH);
+          addAwake("Wake Window 5", ww5);
+        }
+
+        // Bedtime marker (start == end; the preceding wake window leads into it)
+        evs.push({ type: "sleep", label: "Bedtime", start: cursor, end: cursor, duration: 0, isBedtime: true });
+
+        return { events: evs, includeCatnap };
+      }, [wakeTime, ww1, nap1, ww2, nap2, ww3, nap3, ww4, ww5]);
+
+      const bedtime = events[events.length - 1].start;
+
+      return (
+        <div className="max-w-5xl mx-auto p-4 sm:p-6">
+          <header className="mb-6">
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800">Baby Sleep Schedule</h1>
+            <p className="text-slate-500 text-sm mt-1">Drag the sliders — the day cascades automatically.</p>
+          </header>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* ---- Controls ---- */}
+            <div>
+              <Section title="Morning">
+                <div className="mb-1">
+                  <label className="text-sm font-medium text-slate-700 block mb-1">Wake Time</label>
+                  <input
+                    type="time"
+                    value={wakeTime}
+                    onChange={(e) => setWakeTime(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-lg font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </Section>
+
+              <Section title="Nap 1">
+                <Slider label="Wake Window 1" value={ww1} min={60} max={180} onChange={setWw1} />
+                <Slider label="Nap 1 Length" value={nap1} min={20} max={120} onChange={setNap1} />
+              </Section>
+
+              <Section title="Nap 2">
+                <Slider label="Wake Window 2" value={ww2} min={60} max={180} onChange={setWw2} />
+                <Slider label="Nap 2 Length" value={nap2} min={20} max={120} onChange={setNap2} />
+              </Section>
+
+              <Section title="Nap 3">
+                <Slider label="Wake Window 3" value={ww3} min={60} max={180} onChange={setWw3} />
+                <Slider label="Nap 3 Length" value={nap3} min={20} max={120} onChange={setNap3} />
+              </Section>
+
+              <Section title={includeCatnap ? "Nap 4 (Catnap)" : "Final Wake Window"}>
+                <Slider label="Wake Window 4" value={ww4} min={60} max={180} onChange={setWw4} />
+                {includeCatnap ? (
+                  <>
+                    <div className="mb-4">
+                      <div className="flex justify-between items-baseline mb-1">
+                        <label className="text-sm font-medium text-slate-700">Nap 4 Length</label>
+                        <span className="text-sm font-semibold text-slate-400 tabular-nums">{NAP4_LENGTH}m (fixed)</span>
+                      </div>
+                    </div>
+                    <Slider label="Wake Window 5" value={ww5} min={60} max={180} onChange={setWw5} />
+                  </>
+                ) : (
+                  <div className="rounded-lg bg-amber-100 border border-amber-300 text-amber-800 text-sm px-3 py-2">
+                    Nap 4 Skipped (Nap 3 ended after 3:30 PM)
+                  </div>
+                )}
+              </Section>
+            </div>
+
+            {/* ---- Timeline ---- */}
+            <div>
+              <div className="bg-white rounded-xl shadow-sm p-4 mb-4 flex justify-between items-center">
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Bedtime</div>
+                  <div className="text-2xl font-bold text-indigo-600">{formatTime(bedtime)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-bold uppercase tracking-wide text-slate-400">Naps</div>
+                  <div className="text-2xl font-bold text-slate-700">{includeCatnap ? 4 : 3}</div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {events.map((ev, i) =>
+                  ev.isBedtime ? (
+                    <div key={i} className="rounded-xl border border-indigo-800 bg-indigo-900 text-white p-4 flex justify-between items-center">
+                      <div className="font-semibold flex items-center gap-2"><span>🛏️</span> Bedtime</div>
+                      <div className="text-lg font-bold tabular-nums">{formatTime(ev.start)}</div>
+                    </div>
+                  ) : (
+                    <EventCard key={i} event={ev} />
+                  )
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
